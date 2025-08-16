@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from 'react';
 const HomePage = () => {
   const selectedDevice = useRef<USBDevice>();
   const { message } = App.useApp();
+  const inited = useRef<boolean>(false);
 
   const getEndpoint = useCallback((device: USBDevice) => {
     let inEndpoint = undefined;
@@ -49,6 +50,7 @@ const HomePage = () => {
 
   const initDevice = useCallback(async (device: USBDevice) => {
     await device.open();
+    console.log('device.configuration', device.configuration);
     const { configurationValue, interfaces } = device.configuration!;
     await device.selectConfiguration(configurationValue || 0);
     for (const intf of interfaces) {
@@ -62,6 +64,7 @@ const HomePage = () => {
         }
       }
     }
+    console.log('打开设备成功');
   }, []);
 
   const connect = useCallback(async () => {
@@ -78,9 +81,37 @@ const HomePage = () => {
       message.error({ content: 'please pair device first' });
       return;
     }
-    const cmd = new Uint8Array([0x1f, 0x1b, 0x1f, 0x67, 0x00]);
-    const { outEndpoint } = getEndpoint(selectedDevice.current);
-    selectedDevice.current.transferOut(outEndpoint!, cmd);
+
+    const hide = message.loading({ content: '打印中', duration: 0 });
+    try {
+      const { outEndpoint } = getEndpoint(selectedDevice.current);
+      if (!inited.current) {
+        console.log('执行初始化');
+        const init = new Uint8Array([0x1b, 0x40]); // ESC @
+        const res = await selectedDevice.current.transferOut(
+          outEndpoint!,
+          init,
+        ); // reset printer
+        console.log('初始化成功', res);
+        inited.current = true;
+      }
+
+      console.log('执行打印');
+      const encoder = new TextEncoder();
+      const text = encoder.encode('Hello World\n'); // ASCII
+      const res = await selectedDevice.current.transferOut(outEndpoint!, text); // print text
+      console.log('打印成功', res);
+      setTimeout(() => {
+        message.success({ content: '打印成功' });
+      }, 500);
+    } catch (e) {
+      setTimeout(() => {
+        message.error({ content: '打印失败' });
+      }, 500);
+      console.error('打印失败', e);
+    } finally {
+      hide();
+    }
   }, []);
 
   useEffect(() => {
